@@ -1,4 +1,5 @@
 import sys
+import warnings
 
 import numpy as np
 import pytest
@@ -44,6 +45,20 @@ def test_interval_brackets_the_prediction(field):
     pred = model.predict(q)
     lo, hi = model.interval(alpha=0.1)
     assert (lo <= pred).all() and (pred <= hi).all()
+
+
+def test_prediction_does_not_emit_known_gstatsim_matmul_warnings(field):
+    pts, vals = field
+    model = GridKriging().fit(pts, vals)
+    q = np.column_stack([
+        np.linspace(5_000.0, 55_000.0, 60),
+        np.linspace(55_000.0, 5_000.0, 60),
+    ])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        model.predict(q, outside="nearest")
+    messages = [str(item.message) for item in caught]
+    assert not any("encountered in matmul" in message for message in messages)
 
 
 def test_outside_hull_is_nan_by_default(field):

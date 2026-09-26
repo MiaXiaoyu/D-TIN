@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -118,9 +120,16 @@ class GridKriging(Surface):
         import gstatsim as gs
 
         fn = gs.Interpolation.skrige if self.variant == "simple" else gs.Interpolation.okrige
-        estimate, variance = fn(
-            coords, self._frame, "x", "y", "N_elev", self.k, self._vario_params, radius
-        )
+        with warnings.catch_warnings():
+            for message in (
+                "divide by zero encountered in matmul",
+                "overflow encountered in matmul",
+                "invalid value encountered in matmul",
+            ):
+                warnings.filterwarnings("ignore", message=message, category=RuntimeWarning)
+            estimate, variance = fn(
+                coords, self._frame, "x", "y", "N_elev", self.k, self._vario_params, radius
+            )
         return np.asarray(estimate), np.asarray(variance)
 
     def _predict_raw(self, query: np.ndarray) -> np.ndarray:
