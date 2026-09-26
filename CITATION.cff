@@ -8,6 +8,10 @@ repository-code: "https://github.com/MiaXiaoyu/dtin"
 authors:
   - family-names: Xia
     given-names: Xiaoyu
+  - family-names: Bergam
+    given-names: Noah
+  - family-names: Patra
+    given-names: Abani
 preferred-citation:
   type: conference-paper
   title: "D-TINs for Track-Sampled Ice Sheet Surface Reconstruction from Satellite Altimetry Data"
@@ -17,3 +21,7 @@ preferred-citation:
   authors:
     - family-names: Xia
       given-names: Xiaoyu
+    - family-names: Bergam
+      given-names: Noah
+    - family-names: Patra
+      given-names: Abani

@@ -1,13 +1,9 @@
 # dtin
 
-Surface reconstruction from track-sampled satellite altimetry using a Delaunay
-triangulation of the measurements (D-TIN). This is the method of
-
-> *D-TINs for Track-Sampled Ice Sheet Surface Reconstruction from Satellite
-> Altimetry Data.* SSTDM Workshop, IEEE ICDM 2026.
-
-The package also includes the multiscale variant MS-D-TIN and the two baselines
-used in the paper, a tile polynomial and GStatSim ordinary kriging.
+`dtin` reconstructs an ice-sheet surface from track-sampled satellite
+altimetry with Delaunay triangulation and barycentric interpolation. It
+implements D-TIN, MS-D-TIN, and the two comparison methods used in our
+accepted IEEE ICDM 2026 SSTDM Workshop paper.
 
 ## Install
 
@@ -15,88 +11,107 @@ used in the paper, a tile polynomial and GStatSim ordinary kriging.
 pip install git+https://github.com/MiaXiaoyu/dtin
 ```
 
-Optional extras:
+Kriging needs additional packages. From a cloned repository, install them
+with `pip install ".[kriging]"`. The Ghub notebook uses `dtin[app]`, and
+GeoTIFF output uses `dtin[geotiff]`.
 
-| Extra | Needed for |
-|---|---|
-| `dtin[kriging]` | `--method kriging` |
-| `dtin[geotiff]` | `.tif` output |
-| `dtin[parquet]` | `.parquet` input |
-| `dtin[crs]` | a CRS other than EPSG:3413 or EPSG:3031 |
-| `dtin[app]` | the notebook |
+## Input CSV
 
-## Data
+The input is a CSV file containing these exact columns:
 
-No data is included. The input is a CSV or Parquet file with longitude,
-latitude and elevation columns. Public sources:
+| Column | Meaning | Unit |
+|---|---|---|
+| `lon` | WGS84 longitude | degrees |
+| `lat` | WGS84 latitude | degrees |
+| `elev` | surface elevation | metres |
 
-- ICESat GLAS GLA12 Release 34: <https://nsidc.org/data/gla12>
-- ICESat-2 ATL06: <https://nsidc.org/data/atl06>
+Other columns are ignored. For example:
 
-Both require a free NASA Earthdata login.
+```csv
+lon,lat,elev
+-49.8124,70.1053,1842.6
+-49.8079,70.1068,1843.1
+-49.8035,70.1084,1844.0
+-49.7990,70.1100,1844.8
+-49.7946,70.1115,1845.2
+```
 
-| Column | Default name | Also accepted | Option |
-|---|---|---|---|
-| longitude | `lon` | `longitude` | `--lon-col` |
-| latitude | `lat` | `latitude` | `--lat-col` |
-| elevation | `elev` | `elevation`, `h`, `z` | `--elev-col` |
+No data is included in this repository. Public source products include
+[ICESat GLAS GLA12 Release 34](https://nsidc.org/data/gla12) and
+[ICESat-2 ATL06](https://nsidc.org/data/atl06); both require a free NASA
+Earthdata account. This tool does not read the original NASA HDF5 files
+directly. First extract longitude, latitude, and elevation into a CSV and name
+the columns `lon`, `lat`, and `elev`.
 
-Points are projected to EPSG:3413 (Greenland) by default. Use `--crs EPSG:3031`
-for Antarctica, or `--xy` if the file already has projected `x`, `y` columns.
-`--min-elev 5` removes ocean returns, as in the paper.
+The coordinates are projected internally to EPSG:3413. Use `--min-elev 5` to
+apply the ocean-return filter used in the paper.
 
-## Usage
+## Run
+
+Check a file before starting a reconstruction:
 
 ```bash
 dtin info --input points.csv
 dtin reconstruct --input points.csv --grid 1000 --out surface.csv
-dtin reconstruct --input points.csv --grid 1000 --out surface.tif
-dtin reconstruct --input points.csv --query targets.csv --out predictions.csv
-dtin reconstruct --input points.csv --grid 1000 --method ms-dtin --out surface.csv
 ```
+
+To predict only at specified locations, provide a query CSV containing `lon`
+and `lat`:
+
+```bash
+dtin reconstruct --input points.csv --query targets.csv --out predictions.csv
+```
+
+The same workflow is available from Python:
 
 ```python
 from dtin import DTIN, load_points, make_grid
 
-pts = load_points("points.csv")
-xy, z = pts[["x", "y"]].to_numpy(), pts["elev"].to_numpy()
-model = DTIN().fit(xy, z)
-grid = make_grid(xy, res_m=1000.0)
+points = load_points("points.csv")
+xy = points[["x", "y"]].to_numpy()
+model = DTIN().fit(xy, points["elev"].to_numpy())
+grid = make_grid(xy, res_m=1000)
 surface = model.predict(grid.nodes).reshape(grid.shape)
 ```
 
+`main.ipynb` provides the Ghub interface: upload a CSV, check its extent,
+choose a method and grid spacing, reconstruct, then download the result.
+`middleware/invoke` is the Ghub launcher.
+
 ## Methods
 
-| `--method` | Description | Default parameters |
+| Name | Definition | Paper setting |
 |---|---|---|
-| `dtin` | Delaunay triangulation of all measurements, linear interpolation | none |
-| `ms-dtin` | D-TINs on 1, 5 and 10 km cell means, weighted 0.6, 0.3, 0.1 | `--scales 1000 5000 10000 --weights 0.6 0.3 0.1` |
-| `tile` | Independent cubic polynomial per tile | `--tile-size 5000 --degree 3` |
-| `kriging` | [GStatSim](https://github.com/GatorGlaciology/GStatSim) ordinary kriging on 1 km cell means | `--maxlag 800000 --support 1000` |
+| `dtin` | Delaunay triangulation of all measurements with linear barycentric interpolation | no fitted parameter |
+| `ms-dtin` | D-TINs on 1, 5, and 10 km cell means | weights 0.6, 0.3, 0.1 |
+| `tile` | Independent polynomial in each square tile | 5 km tiles, degree up to 3 |
+| `kriging` | GStatSim ordinary kriging on 1 km cell means | 800 km variogram maxlag |
 
-Kriging is much slower than the other methods; use `--bbox` to try a small area first.
+Kriging is substantially slower than the TIN methods. Use `--bbox` for a
+small first run.
 
 ## Output
 
-CSV output has columns `x, y, lon, lat, elev`. GeoTIFF output is a single band
-in the working CRS. Points outside the convex hull of the input are `NaN`;
-`--fill-nearest` uses the nearest measurement instead.
-
-## Notebook
-
-`main.ipynb` provides the same functions with a simple interface: load a file,
-choose a method and grid spacing, and reconstruct. `middleware/invoke` launches
-it as a Ghub tool.
+CSV output contains `x`, `y`, `lon`, `lat`, and `elev`. GeoTIFF output is a
+single EPSG:3413 band. Predictions outside the input convex hull are `NaN`;
+`--fill-nearest` replaces them with the nearest measurement value.
 
 ## Citation
 
+Xiaoyu Xia, Noah Bergam, and Abani Patra, “D-TINs for Track-Sampled Ice Sheet
+Surface Reconstruction from Satellite Altimetry Data,” IEEE ICDM 2026 SSTDM
+Workshop.
+
 ```bibtex
-@inproceedings{dtin2026,
+@inproceedings{xia2026dtin,
+  author    = {Xiaoyu Xia and Noah Bergam and Abani Patra},
   title     = {D-TINs for Track-Sampled Ice Sheet Surface Reconstruction from Satellite Altimetry Data},
-  booktitle = {IEEE International Conference on Data Mining Workshops (ICDMW)},
+  booktitle = {IEEE International Conference on Data Mining Workshops},
   year      = {2026}
 }
 ```
+
+DOI and page numbers will be added when the proceedings publish them.
 
 ## License
 
