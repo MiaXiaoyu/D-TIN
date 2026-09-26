@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import dtin.tin as tin_mod
@@ -38,14 +37,20 @@ def _run_interactive_cells(monkeypatch, tmp_path, output_dir=None):
     return ns
 
 
-def test_notebook_widget_resolves_column_aliases(monkeypatch, tmp_path):
+def test_notebook_exposes_only_the_csv_contract(monkeypatch, tmp_path):
     ns = _run_interactive_cells(monkeypatch, tmp_path)
     assert ns["HEADLESS"] is False
-    f = tmp_path / "aliases.csv"
-    pd.DataFrame({"longitude": [-49.5, -49.3, -49.4], "latitude": [70.1, 70.1, 70.2], "h": [1.0, 2.0, 3.0]}).to_csv(f, index=False)
-    ns["path_box"].value = str(f)
-    ns["_on_check"](None)
-    assert ns["STATE"]["points"] is not None and len(ns["STATE"]["points"]) == 3
+    assert ns["upload"].accept == ".csv"
+    assert all(name in ns["FORMAT_NOTE"] for name in ("lon", "lat", "elev"))
+    assert "lon_box" not in ns and "xy_box" not in ns and "crs_box" not in ns
+
+
+def test_uploaded_filename_is_reduced_to_basename(monkeypatch, tmp_path):
+    ns = _run_interactive_cells(monkeypatch, tmp_path)
+    ns["_upload_value"] = lambda: ("../outside.csv", b"lon,lat,elev\n-45,72,1\n")
+    target = ns["_uploaded_path"]()
+    assert target.parent == ns["OUTPUT_DIR"] / "uploads"
+    assert target.name == "outside.csv"
 
 
 def test_notebook_falls_back_when_output_dir_is_not_writable(monkeypatch, tmp_path):

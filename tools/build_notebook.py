@@ -8,20 +8,26 @@ import nbformat
 
 ROOT = Path(__file__).resolve().parents[1]
 
-INTRO = """# D-TIN surface reconstruction
+INTRO = """<style>
+:root { --dtin-ice: #DCEFF5; --dtin-navy: #15354A; --dtin-cyan: #2B7A9B; --dtin-gray: #5E6B73; }
+.dtin-title { color: var(--dtin-navy); font: 650 2rem/1.15 system-ui, sans-serif; margin-bottom: .35rem; }
+.dtin-lead { color: var(--dtin-gray); font: 1rem/1.55 system-ui, sans-serif; max-width: 72ch; }
+.dtin-contract { background: var(--dtin-ice); border-left: 4px solid var(--dtin-cyan); padding: .75rem 1rem; max-width: 68ch; }
+</style>
 
-Reconstructs a surface from a track-sampled altimetry point cloud using a
-Delaunay triangulation of the measurements (D-TIN). MS-D-TIN and two
-baselines, a tile polynomial and GStatSim ordinary kriging, are also available.
+<div class="dtin-title">D-TIN surface reconstruction</div>
+<p class="dtin-lead">Reconstruct an ice-sheet surface from track-sampled
+altimetry with D-TIN. The paper's MS-D-TIN, tile polynomial, and GStatSim
+ordinary-kriging methods are included for comparison.</p>
 
-Input: a CSV with longitude, latitude and elevation columns, for example
-ICESat GLA12 (<https://nsidc.org/data/gla12>) or ICESat-2 ATL06 from NSIDC.
-Upload a small file, or enter the path of a larger one.
+<div class="dtin-contract"><strong>Input CSV</strong><br>
+Required columns: <code>lon</code> (degrees), <code>lat</code> (degrees), and
+<code>elev</code> (metres). No dataset is included with this tool.</div>
 
-1. Choose the file and press *Check file*.
-2. Choose a method and grid spacing and press *Reconstruct*.
+1. Upload a CSV, or enter its server path for a large file, then select **Check CSV**.
+2. Choose a method and grid spacing, then select **Reconstruct surface**.
 
-Results are saved as CSV in `output/`.
+The result is saved as a CSV and shown beside the input point support.
 """
 
 BOOTSTRAP = r'''import os
@@ -44,9 +50,10 @@ from dtin import METHODS, describe_load, load_points, make_grid, summarize_model
 HEADLESS = os.environ.get("DTIN_NB_INPUT") is not None
 try:
     import ipywidgets as widgets
-    from IPython.display import display
+    from IPython.display import FileLink, display
 except ImportError:
     widgets = None
+    FileLink = None
     HEADLESS = True
 try:
     import matplotlib
@@ -79,9 +86,11 @@ RUNS = {}
 print(f"dtin {dtin.__version__} from {SRC}; output -> {OUTPUT_DIR}")
 '''
 
-INPUT_CELL = r'''def load_from(path, lon="", lat="", elev="", xy=False, crs="EPSG:3413", min_elev=None):
-    pts = load_points(path, lon_col=lon or None, lat_col=lat or None, elev_col=elev or None,
-                      xy=xy, crs=crs, min_elev=min_elev)
+INPUT_CELL = r'''FORMAT_NOTE = "CSV columns: lon (degrees), lat (degrees), elev (metres)."
+
+
+def load_from(path, min_elev=None):
+    pts = load_points(path, min_elev=min_elev)
     STATE["points"] = pts
     print(describe_load(pts))
     return pts
@@ -90,32 +99,35 @@ INPUT_CELL = r'''def load_from(path, lon="", lat="", elev="", xy=False, crs="EPS
 if HEADLESS:
     load_from(os.environ["DTIN_NB_INPUT"])
 else:
+    format_note = widgets.HTML(f"<div style='color:#5E6B73'>{FORMAT_NOTE}</div>")
     upload = widgets.FileUpload(accept=".csv", multiple=False, description="Upload CSV")
-    path_box = widgets.Text(description="or path:", placeholder="/path/to/points.csv",
-                            layout=widgets.Layout(width="60%"))
-    # Blank means the default column names are tried.
-    lon_box = widgets.Text(value="", placeholder="lon / longitude", description="lon col")
-    lat_box = widgets.Text(value="", placeholder="lat / latitude", description="lat col")
-    elev_box = widgets.Text(value="", placeholder="elev / elevation / h / z", description="elev col")
-    xy_box = widgets.Checkbox(value=False, description="columns are projected x, y")
-    crs_box = widgets.Text(value="EPSG:3413", description="CRS")
-    min_elev_box = widgets.Text(value="", description="min elev (m)")
-    check_btn = widgets.Button(description="Check file", button_style="info")
+    path_box = widgets.Text(description="Large file path", placeholder="/path/to/points.csv",
+                            style={"description_width": "initial"},
+                            layout=widgets.Layout(width="75%"))
+    min_elev_box = widgets.Text(value="", description="Minimum elevation (m)",
+                                placeholder="optional", style={"description_width": "initial"})
+    check_btn = widgets.Button(description="Check CSV", button_style="info")
     check_out = widgets.Output()
 
-    def _uploaded_path():
+    def _upload_value():
         value = upload.value
         if not value:
             return None
         if isinstance(value, dict):                     # ipywidgets 7
             name, item = next(iter(value.items()))
-            content = item["content"]
+            return name, bytes(item["content"])
         else:                                           # ipywidgets 8
             item = value[0]
-            name, content = item["name"], item["content"]
-        target = OUTPUT_DIR / "uploads" / name
+            return item["name"], bytes(item["content"])
+
+    def _uploaded_path():
+        item = _upload_value()
+        if item is None:
+            return None
+        name, content = item
+        target = OUTPUT_DIR / "uploads" / Path(name).name
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(bytes(content))
+        target.write_bytes(content)
         return target
 
     def _resolve_path():
@@ -131,16 +143,13 @@ else:
         with check_out:
             try:
                 me = float(min_elev_box.value) if min_elev_box.value.strip() else None
-                load_from(_resolve_path(), lon_box.value, lat_box.value, elev_box.value,
-                          xy_box.value, crs_box.value, me)
+                load_from(_resolve_path(), me)
             except Exception as exc:
                 print("Error:", exc)
 
     check_btn.on_click(_on_check)
     display(widgets.VBox([
-        upload, path_box,
-        widgets.HBox([lon_box, lat_box, elev_box]),
-        widgets.HBox([xy_box, crs_box, min_elev_box]),
+        format_note, upload, path_box, min_elev_box,
         check_btn, check_out,
     ]))
 '''
@@ -162,8 +171,7 @@ def reconstruct(method, params, res_m, bbox=None):
     spec = make_grid(xy, res_m, bbox=bbox)
     elev = model.predict(spec.nodes, outside="nan")
     seconds = time.perf_counter() - t0
-    crs = pts.attrs["report"].crs
-    lon, lat = unproject(spec.nodes[:, 0], spec.nodes[:, 1], crs)
+    lon, lat = unproject(spec.nodes[:, 0], spec.nodes[:, 1])
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out = OUTPUT_DIR / f"{method}_{int(res_m)}m_{stamp}.csv"
     pd.DataFrame({"x": spec.nodes[:, 0], "y": spec.nodes[:, 1], "lon": lon, "lat": lat, "elev": elev}).to_csv(out, index=False)
@@ -172,7 +180,7 @@ def reconstruct(method, params, res_m, bbox=None):
     print(summarize_model(model))
     print(f"{spec.shape[1]} x {spec.shape[0]} nodes, {100 * np.isfinite(elev).mean():.1f}% inside the hull, {seconds:.1f} s")
     print(f"wrote {out}")
-    return key
+    return key, out
 
 
 def show(keys):
@@ -201,8 +209,10 @@ def show(keys):
 
 if HEADLESS:
     method = os.environ.get("DTIN_NB_METHOD", "dtin")
-    key = reconstruct(method, dict(METHODS[method].params), float(os.environ.get("DTIN_NB_GRID", "1000")))
+    key, out = reconstruct(method, dict(METHODS[method].params), float(os.environ.get("DTIN_NB_GRID", "1000")))
     show([key])
+    if FileLink is not None:
+        display(FileLink(str(out), result_html_prefix="Download result: "))
 else:
     method_dd = widgets.Dropdown(options=[(f"{v.label} - {v.help}", k) for k, v in METHODS.items()],
                                  value="dtin", description="Method", layout=widgets.Layout(width="90%"))
@@ -210,7 +220,7 @@ else:
     bbox_box = widgets.Text(value="", description="bbox", placeholder="xmin ymin xmax ymax (metres, optional)",
                             layout=widgets.Layout(width="60%"))
     params_box = widgets.VBox([])
-    run_btn = widgets.Button(description="Reconstruct", button_style="primary")
+    run_btn = widgets.Button(description="Reconstruct surface", button_style="primary")
     compare_dd = widgets.Dropdown(options=[], description="Compare with", layout=widgets.Layout(width="60%"))
     run_out = widgets.Output()
 
@@ -225,10 +235,11 @@ else:
         with run_out:
             try:
                 bbox = tuple(float(v) for v in bbox_box.value.split()) if bbox_box.value.strip() else None
-                key = reconstruct(method_dd.value, _read_params(), float(grid_box.value), bbox)
+                key, out = reconstruct(method_dd.value, _read_params(), float(grid_box.value), bbox)
                 others = [compare_dd.value] if compare_dd.value else []
                 compare_dd.options = [""] + list(RUNS)
                 show([key] + others)
+                display(FileLink(str(out), result_html_prefix="Download result: "))
             except Exception as exc:
                 print("Error:", exc)
 
