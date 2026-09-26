@@ -65,6 +65,18 @@ def test_notebook_falls_back_when_output_dir_is_not_writable(monkeypatch, tmp_pa
         locked.chmod(0o700)
 
 
+def test_download_link_is_relative_to_notebook_root(monkeypatch, tmp_path):
+    ns = _run_interactive_cells(monkeypatch, tmp_path, output_dir=ROOT / "output")
+    result = ROOT / "output" / "surface.csv"
+    result.write_text("lon,lat,elev\n", encoding="utf-8")
+    try:
+        rendered = ns["_result_link"](result)._repr_html_()
+        assert 'href="output/surface.csv"' in rendered or "href='output/surface.csv'" in rendered
+        assert str(ROOT) not in rendered
+    finally:
+        result.unlink()
+
+
 def test_hull_test_does_not_retriangulate_all_points(monkeypatch):
     rng = np.random.default_rng(0)
     pts = rng.uniform(0, 40_000, size=(3000, 2))

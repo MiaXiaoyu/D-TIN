@@ -81,6 +81,17 @@ OUTPUT_DIR = _writable_dir(
     Path(os.environ.get("DTIN_NB_OUTPUT_DIR", ROOT / "output")),
     Path.home() / "dtin_output",
 )
+
+def _result_link(path):
+    """Build a browser-usable link for results stored under the notebook root."""
+    path = Path(path).resolve()
+    try:
+        display_path = path.relative_to(ROOT)
+    except ValueError:
+        display_path = path
+    return FileLink(str(display_path), result_html_prefix="Download result: ")
+
+
 STATE = {"points": None}
 RUNS = {}
 print(f"dtin {dtin.__version__} from {SRC}; output -> {OUTPUT_DIR}")
@@ -212,7 +223,7 @@ if HEADLESS:
     key, out = reconstruct(method, dict(METHODS[method].params), float(os.environ.get("DTIN_NB_GRID", "1000")))
     show([key])
     if FileLink is not None:
-        display(FileLink(str(out), result_html_prefix="Download result: "))
+        display(_result_link(out))
 else:
     method_dd = widgets.Dropdown(options=[(f"{v.label} - {v.help}", k) for k, v in METHODS.items()],
                                  value="dtin", description="Method", layout=widgets.Layout(width="90%"))
@@ -239,7 +250,7 @@ else:
                 others = [compare_dd.value] if compare_dd.value else []
                 compare_dd.options = [""] + list(RUNS)
                 show([key] + others)
-                display(FileLink(str(out), result_html_prefix="Download result: "))
+                display(_result_link(out))
             except Exception as exc:
                 print("Error:", exc)
 
