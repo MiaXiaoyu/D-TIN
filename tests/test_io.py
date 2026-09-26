@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 import pytest
 
 from dtin.io import LoadReport, describe_load, load_points
@@ -24,22 +23,20 @@ def test_default_columns_are_projected(tmp_path):
     assert rep.rows_read == 2 and rep.rows_used == 2 and rep.crs == "EPSG:3413"
 
 
-def test_aliases_case_and_bom_and_spaces(tmp_path):
-    p = _write(tmp_path, "b.csv", "\ufeffLongitude ,LATITUDE,Elevation\n-45,72,1500\n-44,72.5,1600\n")
-    df = load_points(p)
-    assert df.attrs["report"].columns == {"lon": "Longitude", "lat": "LATITUDE", "elev": "Elevation"}
-    assert len(df) == 2
-
-
-def test_explicit_column_names(tmp_path):
-    p = _write(tmp_path, "c.csv", "a,b,c\n-45,72,1500\n-44,72.5,1600\n")
-    df = load_points(p, lon_col="a", lat_col="b", elev_col="c")
-    assert len(df) == 2
+@pytest.mark.parametrize("header", [
+    "longitude,lat,elev",
+    "lon,latitude,elev",
+    "lon,lat,elevation",
+])
+def test_training_file_requires_exact_column_names(tmp_path, header):
+    p = _write(tmp_path, "bad.csv", header + "\n-45,72,1500\n")
+    with pytest.raises(ValueError, match=r"required columns.*lon.*lat.*elev.*found"):
+        load_points(p)
 
 
 def test_missing_column_lists_what_is_there(tmp_path):
     p = _write(tmp_path, "d.csv", "a,b,c\n1,2,3\n")
-    with pytest.raises(ValueError, match=r"lon.*\['a', 'b', 'c'\]"):
+    with pytest.raises(ValueError, match=r"required columns.*lon.*lat.*elev.*found.*a.*b.*c"):
         load_points(p)
 
 
@@ -56,29 +53,22 @@ def test_min_elev_filter(tmp_path):
     assert len(df) == 1 and df.attrs["report"].rows_dropped_min_elev == 1
 
 
-def test_xy_input_round_trips_to_lon_lat(tmp_path):
-    x, y = project([-45.0, -44.0], [72.0, 72.5])
-    p = _write(tmp_path, "g.csv", "x,y,elev\n" + "\n".join(f"{a},{b},1500" for a, b in zip(x, y)) + "\n")
-    df = load_points(p, xy=True)
-    np.testing.assert_allclose(df["lon"], [-45.0, -44.0], atol=1e-8)
-    np.testing.assert_allclose(df["lat"], [72.0, 72.5], atol=1e-8)
-
-
-def test_query_file_without_elevation(tmp_path):
+def test_query_requires_lon_and_lat_but_not_elev(tmp_path):
     p = _write(tmp_path, "h.csv", "lon,lat\n-45,72\n")
     df = load_points(p, need_elev=False)
     assert list(df.columns) == ["x", "y", "lon", "lat"]
 
 
-def test_parquet_input(tmp_path):
-    p = tmp_path / "i.parquet"
-    pd.DataFrame({"lon": [-45.0, -44.0], "lat": [72.0, 72.5], "elev": [1.0, 2.0]}).to_parquet(p)
-    assert len(load_points(p)) == 2
+def test_extra_columns_are_ignored(tmp_path):
+    p = _write(tmp_path, "extra.csv", "time,lon,lat,elev,quality\n1,-45,72,1500,0\n")
+    df = load_points(p)
+    assert list(df.columns) == ["x", "y", "lon", "lat", "elev"]
 
 
-def test_unsupported_extension(tmp_path):
-    p = _write(tmp_path, "j.xyz", "lon,lat,elev\n")
-    with pytest.raises(ValueError, match=r"\.csv or \.parquet"):
+@pytest.mark.parametrize("name", ["points.parquet", "points.txt", "points.h5"])
+def test_only_csv_is_accepted(tmp_path, name):
+    p = _write(tmp_path, name, "lon,lat,elev\n-45,72,1500\n")
+    with pytest.raises(ValueError, match="CSV"):
         load_points(p)
 
 

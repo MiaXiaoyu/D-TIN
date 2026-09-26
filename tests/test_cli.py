@@ -77,9 +77,23 @@ def test_errors_go_to_stderr_with_exit_1(tmp_path, capsys):
     bad.write_text("a,b\n1,2\n")
     assert main(["info", "--input", str(bad)]) == 1
     err = capsys.readouterr().err
-    assert "no column for lon" in err and "Traceback" not in err
+    assert "required columns" in err and "Traceback" not in err
 
 
 def test_grid_and_query_are_exclusive(synthetic_csv, tmp_path, capsys):
     rc = main(["reconstruct", "--input", str(synthetic_csv), "--grid", "1000", "--query", str(synthetic_csv), "--out", str(tmp_path / "o.csv")])
     assert rc == 2  # argparse usage error
+
+
+@pytest.mark.parametrize("flag,value", [
+    ("--xy", None),
+    ("--crs", "EPSG:3413"),
+    ("--lon-col", "lon"),
+    ("--lat-col", "lat"),
+    ("--elev-col", "elev"),
+])
+def test_removed_input_options_are_rejected(synthetic_csv, flag, value):
+    argv = ["info", "--input", str(synthetic_csv), flag]
+    if value is not None:
+        argv.append(value)
+    assert main(argv) == 2

@@ -19,22 +19,13 @@ from dtin.projection import unproject
 
 def _add_input_args(parser: argparse.ArgumentParser) -> None:
     g = parser.add_argument_group("input")
-    g.add_argument("--input", required=True, help="CSV or Parquet point file")
-    g.add_argument("--lon-col", help="longitude column (default: lon / longitude)")
-    g.add_argument("--lat-col", help="latitude column (default: lat / latitude)")
-    g.add_argument("--elev-col", help="elevation column (default: elev / elevation / h / z)")
-    g.add_argument("--xy", action="store_true", help="columns are already projected x, y in --crs")
-    g.add_argument("--x-col", help="x column with --xy (default: x / easting)")
-    g.add_argument("--y-col", help="y column with --xy (default: y / northing)")
-    g.add_argument("--crs", default="EPSG:3413", help="working CRS (default EPSG:3413; EPSG:3031 also built in)")
+    g.add_argument("--input", required=True, help="CSV point file with lon, lat, elev columns")
     g.add_argument("--min-elev", type=float, default=None, help="drop rows below this elevation (m)")
 
 
 def _load(args, path=None, need_elev=True) -> pd.DataFrame:
     return load_points(
         path or args.input,
-        lon_col=args.lon_col, lat_col=args.lat_col, elev_col=args.elev_col,
-        x_col=args.x_col, y_col=args.y_col, xy=args.xy, crs=args.crs,
         min_elev=args.min_elev, need_elev=need_elev,
     )
 
@@ -92,8 +83,8 @@ def _method_params(args) -> dict:
     return params
 
 
-def write_csv(path: Path, nodes: np.ndarray, elev: np.ndarray, crs: str) -> None:
-    lon, lat = unproject(nodes[:, 0], nodes[:, 1], crs)
+def write_csv(path: Path, nodes: np.ndarray, elev: np.ndarray) -> None:
+    lon, lat = unproject(nodes[:, 0], nodes[:, 1])
     pd.DataFrame({"x": nodes[:, 0], "y": nodes[:, 1], "lon": lon, "lat": lat, "elev": elev}).to_csv(path, index=False)
 
 
@@ -167,7 +158,7 @@ def cmd_reconstruct(args) -> int:
     if out.suffix.lower() in (".tif", ".tiff"):
         write_geotiff(out, spec, elev, pts.attrs["report"].crs)
     else:
-        write_csv(out, nodes, elev, pts.attrs["report"].crs)
+        write_csv(out, nodes, elev)
     print(f"wrote {out}")
     return 0
 

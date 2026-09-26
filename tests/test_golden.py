@@ -15,7 +15,7 @@ GOLDEN = json.loads((Path(__file__).parent / "golden.json").read_text())
 @pytest.fixture(scope="module")
 def fitted_inputs():
     df = make_tracks()
-    x, y = project(df["lon"].to_numpy(), df["lat"].to_numpy(), "EPSG:3413")
+    x, y = project(df["lon"].to_numpy(), df["lat"].to_numpy())
     return np.column_stack([x, y]), df["elev"].to_numpy(), np.asarray(GOLDEN["query"])
 
 

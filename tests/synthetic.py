@@ -28,5 +28,5 @@ def make_tracks(seed: int = 0, n_tracks: int = 12, length_m: float = 60_000.0) -
     x = np.concatenate(xs)
     y = np.concatenate(ys)
     elev = truth(x, y) + rng.normal(0.0, 0.5, size=len(x))
-    lon, lat = unproject(x, y, "EPSG:3413")
+    lon, lat = unproject(x, y)
     return pd.DataFrame({"lon": lon, "lat": lat, "elev": elev})

@@ -1,4 +1,4 @@
-"""Read a point file (CSV or Parquet) and project it to metres.
+"""Read a lon/lat/elev CSV and project it to EPSG:3413 metres.
 
 Rows with a missing or non-numeric longitude, latitude or elevation are
 dropped and counted.
@@ -12,15 +12,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from dtin.projection import normalise_crs, project, unproject
+from dtin.projection import project
 
-ALIASES = {
-    "lon": ("lon", "longitude"),
-    "lat": ("lat", "latitude"),
-    "elev": ("elev", "elevation", "h", "z"),
-    "x": ("x", "easting"),
-    "y": ("y", "northing"),
-}
+REQUIRED_COLUMNS = ("lon", "lat", "elev")
 
 
 @dataclass(frozen=True)
@@ -39,65 +33,32 @@ class LoadReport:
 
 def read_table(path) -> pd.DataFrame:
     path = Path(path)
-    suffix = path.suffix.lower()
-    if suffix == ".parquet":
-        try:
-            frame = pd.read_parquet(path)
-        except ImportError:
-            raise ImportError(
-                "Parquet input needs pyarrow: pip install 'dtin[parquet]'"
-            ) from None
-    elif suffix in (".csv", ".txt"):
-        frame = pd.read_csv(path, encoding="utf-8-sig")
-    else:
-        raise ValueError(
-            f"unsupported input type {path.suffix!r}; use .csv or .parquet"
-        )
+    if path.suffix.lower() != ".csv":
+        raise ValueError(f"unsupported input type {path.suffix!r}; use a CSV file")
+    frame = pd.read_csv(path, encoding="utf-8-sig")
     frame.columns = [str(c).strip().lstrip("\ufeff") for c in frame.columns]
     return frame
-
-
-def resolve_column(frame: pd.DataFrame, role: str, requested: str | None = None) -> str:
-    lower = {c.lower(): c for c in frame.columns}
-    candidates = (requested,) if requested else ALIASES[role]
-    for name in candidates:
-        if name.strip().lower() in lower:
-            return lower[name.strip().lower()]
-    wanted = requested or "/".join(ALIASES[role])
-    raise ValueError(
-        f"no column for {role} (looked for {wanted}); columns in file: {list(frame.columns)}"
-    )
 
 
 def load_points(
     path,
     *,
-    lon_col: str | None = None,
-    lat_col: str | None = None,
-    elev_col: str | None = None,
-    x_col: str | None = None,
-    y_col: str | None = None,
-    xy: bool = False,
-    crs: str = "EPSG:3413",
     min_elev: float | None = None,
     need_elev: bool = True,
 ) -> pd.DataFrame:
-    """Read a point file and return x, y, lon, lat[, elev] with a LoadReport."""
-    crs = normalise_crs(crs)
+    """Read a CSV and return x, y, lon, lat[, elev] with a LoadReport."""
     raw = read_table(path)
-    cols: dict = {}
-    if xy:
-        cols["x"] = resolve_column(raw, "x", x_col)
-        cols["y"] = resolve_column(raw, "y", y_col)
-    else:
-        cols["lon"] = resolve_column(raw, "lon", lon_col)
-        cols["lat"] = resolve_column(raw, "lat", lat_col)
-    if need_elev:
-        cols["elev"] = resolve_column(raw, "elev", elev_col)
+    required = REQUIRED_COLUMNS if need_elev else REQUIRED_COLUMNS[:2]
+    missing = [name for name in required if name not in raw.columns]
+    if missing:
+        raise ValueError(
+            f"required columns are {', '.join(required)}; missing {', '.join(missing)}; "
+            f"found {list(raw.columns)}"
+        )
 
     frame = pd.DataFrame(
-        {role: pd.to_numeric(raw[c], errors="coerce").to_numpy(dtype=np.float64)
-         for role, c in cols.items()}
+        {name: pd.to_numeric(raw[name], errors="coerce").to_numpy(dtype=np.float64)
+         for name in required}
     )
     keep = np.isfinite(frame.to_numpy()).all(axis=1)
     n_nan = int((~keep).sum())
@@ -109,14 +70,12 @@ def load_points(
         n_min = int(low.sum())
         frame = frame[~low]
 
-    if xy:
-        frame["lon"], frame["lat"] = unproject(frame["x"].to_numpy(), frame["y"].to_numpy(), crs)
-    else:
-        frame["x"], frame["y"] = project(frame["lon"].to_numpy(), frame["lat"].to_numpy(), crs)
+    frame["x"], frame["y"] = project(frame["lon"].to_numpy(), frame["lat"].to_numpy())
 
     order = ["x", "y", "lon", "lat"] + (["elev"] if need_elev else [])
     frame = frame[order].reset_index(drop=True)
-    frame.attrs["report"] = LoadReport(str(path), len(raw), n_nan, n_min, cols, crs)
+    columns = {name: name for name in required}
+    frame.attrs["report"] = LoadReport(str(path), len(raw), n_nan, n_min, columns, "EPSG:3413")
     return frame
 
 
