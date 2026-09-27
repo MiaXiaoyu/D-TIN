@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "D-TIN: Delaunay triangulation surface reconstruction for track-sampled satellite altimetry"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
 authors = [{ name = "Xiaoyu Xia" }]
 dependencies = [
     "numpy>=1.24",

@@ -12,3 +12,9 @@ output/
 *.parquet
 *.tif
 !tests/golden.json
+
+# kept locally, not published
+tests/
+tools/
+LICENSE
+CITATION.cff

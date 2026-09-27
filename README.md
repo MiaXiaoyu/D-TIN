@@ -112,7 +112,3 @@ Workshop.
 ```
 
 DOI and page numbers will be added when the proceedings publish them.
-
-## License
-
-MIT
