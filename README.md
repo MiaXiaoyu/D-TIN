@@ -1,4 +1,4 @@
-# dtin
+# D-TIN
 
 `dtin` reconstructs an ice-sheet surface from track-sampled satellite
 altimetry with Delaunay triangulation and barycentric interpolation. It
