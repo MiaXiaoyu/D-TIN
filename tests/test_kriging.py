@@ -67,6 +67,45 @@ def test_outside_hull_is_nan_by_default(field):
     assert np.isnan(out[0])
 
 
+def test_far_outside_hull_is_nan_without_neighbor_search_failure(field):
+    pts, vals = field
+    out = GridKriging().fit(pts, vals).predict(np.array([[-500_000.0, -500_000.0]]))
+    assert np.isnan(out[0])
+
+
+def test_unreachable_query_is_nan_and_ordinary_queries_still_krige(field):
+    # A query more than escalated_radius_m from every support point cannot be
+    # kriged by GStatSim; it gets NaN rather than an invented value, while
+    # ordinary queries in the same call are kriged as usual.
+    pts, vals = field
+    model = GridKriging().fit(pts, vals)
+    far = np.array([[-500_000.0, -500_000.0]])
+    near = np.array([[30_000.0, 30_000.0]])
+    out = model.predict(np.vstack([far, near]), outside="nearest")
+    assert np.isnan(out[0]) and np.isfinite(out[1])
+    lo, hi = model.interval(0.1)
+    assert np.isnan(lo[0]) and np.isnan(hi[0]) and lo[1] < out[1] < hi[1]
+
+
+def test_support_point_exactly_on_the_search_radius_does_not_break_the_search(field):
+    # Cell-mean support and output grids are both anchored at the data minimum,
+    # so a query can sit at exactly radius_m from its only neighbour. GStatSim
+    # keeps neighbours strictly inside the radius; the neighbour census must
+    # agree with it or GStatSim raises "Unable to find nearest neighbors".
+    pts, vals = field
+    pts = np.round(pts)  # integer coordinates make the lattice distances exact
+    model = GridKriging().fit(pts, vals)
+    support = model._frame
+    row = support["x"].idxmax()
+    sx, sy = float(support.at[row, "x"]), float(support.at[row, "y"])
+    q = np.array([[sx + model.radius_m, sy], [sx + model.escalated_radius_m, sy]])
+    d, _ = model._tree.query(q, k=1)
+    assert d[0] == model.radius_m and d[1] == model.escalated_radius_m  # precondition
+    out = model.predict(q, outside="nearest")  # must not raise
+    assert np.isfinite(out[0])   # escalated to escalated_radius_m and kriged
+    assert np.isnan(out[1])      # nothing strictly inside escalated_radius_m
+
+
 def test_no_support_discretisation_when_support_m_is_none(field):
     pts, vals = field
     model = GridKriging(support_m=None).fit(pts, vals)

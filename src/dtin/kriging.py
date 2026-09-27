@@ -32,7 +32,8 @@ class GridKriging(Surface):
     Elevations are normal-score transformed, an exponential variogram is
     fitted with scikit-gstat, and each query is kriged from its ``k`` nearest
     support points within ``radius_m`` (``escalated_radius_m`` where none are
-    found). ``support_m=None`` kriges on the raw points.
+    found; NaN where none are found at all).
+    ``support_m=None`` kriges on the raw points.
     """
 
     def __init__(
@@ -137,8 +138,14 @@ class GridKriging(Surface):
             raise RuntimeError("GridKriging.predict called before fit")
         query = np.asarray(query, dtype=np.float64)
 
-        counts = self._tree.query_ball_point(query, r=self.radius_m, return_length=True)
-        isolated = counts == 0
+        # GStatSim keeps neighbours with distance strictly below the radius.
+        # Mirror that exactly: support and output grids share the data-minimum
+        # origin, so a query can sit at precisely radius_m from its only
+        # neighbour, and a "<=" census would send it to a search that fails.
+        nearest_dist, _ = self._tree.query(query, k=1)
+        isolated = ~(nearest_dist < self.radius_m)
+        escalated = isolated & (nearest_dist < self.escalated_radius_m)
+        unreachable = isolated & ~escalated
 
         normal_scores = np.empty(len(query))
         normal_variance = np.empty(len(query))
@@ -146,10 +153,14 @@ class GridKriging(Surface):
             normal_scores[~isolated], normal_variance[~isolated] = self._krige(
                 query[~isolated], self.radius_m
             )
-        if isolated.any():
-            normal_scores[isolated], normal_variance[isolated] = self._krige(
-                query[isolated], self.escalated_radius_m
+        if escalated.any():
+            normal_scores[escalated], normal_variance[escalated] = self._krige(
+                query[escalated], self.escalated_radius_m
             )
+        # No support inside escalated_radius_m: GStatSim raises rather than
+        # kriging from an empty neighbourhood, so these nodes get no estimate.
+        normal_scores[unreachable] = np.nan
+        normal_variance[unreachable] = np.nan
 
         predictions = self._nst.inverse_transform(normal_scores.reshape(-1, 1)).ravel()
 
