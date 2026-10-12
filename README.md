@@ -2,7 +2,7 @@
 
 `dtin` reconstructs an ice-sheet surface from track-sampled satellite
 altimetry with Delaunay triangulation and barycentric interpolation. It
-implements D-TIN, MS-D-TIN, and the two comparison methods used in our
+implements D-TIN, MS-D-TIN, and the GStatSim kriging comparison used in our
 accepted IEEE ICDM 2026 SSTDM Workshop paper.
 
 ## Install
@@ -75,7 +75,9 @@ surface = model.predict(grid.nodes).reshape(grid.shape)
 ```
 
 `main.ipynb` provides the Ghub interface: upload a CSV, check its extent,
-choose a method and grid spacing, reconstruct, then download the result.
+choose a method and grid spacing, optionally a second method to compare with,
+reconstruct, then download the result. A comparison run shows both surfaces
+side by side with summary statistics of their difference.
 `middleware/invoke` is the Ghub launcher.
 
 ## Methods
@@ -84,7 +86,9 @@ choose a method and grid spacing, reconstruct, then download the result.
 |---|---|---|
 | `dtin` | Delaunay triangulation of all measurements with linear barycentric interpolation | no fitted parameter |
 | `ms-dtin` | D-TINs on 1, 5, and 10 km cell means | weights 0.6, 0.3, 0.1 |
-| `tile` | Independent polynomial in each square tile | 5 km tiles, degree up to 3 |
+
+The MS-D-TIN weights default to the paper setting. Other weights can be given
+with `--weights`, for example `--weights 0.5 0.3 0.2`; they must sum to 1.
 | `kriging` | GStatSim ordinary kriging on 1 km cell means | 800 km variogram maxlag |
 
 Kriging is substantially slower than the TIN methods. Use `--bbox` for a
@@ -92,8 +96,13 @@ small first run.
 
 ## Output
 
-CSV output contains `x`, `y`, `lon`, `lat`, and `elev`. GeoTIFF output is a
-single EPSG:3413 band. Predictions outside the input convex hull are `NaN`;
+CSV output contains `x`, `y`, `lon`, `lat`, `elev`, and `support_dist_m`, the
+distance from each output location to the nearest input measurement. The paper
+reports error by this distance, so it indicates which parts of the surface are
+bridged across wide gaps and are least reliable. D-TIN is a deterministic
+interpolant and has no native prediction uncertainty. Kriging output adds
+`elev_lo` and `elev_hi`, a 90% prediction interval from the kriging variance.
+GeoTIFF output is a single EPSG:3413 band. Predictions outside the input convex hull are `NaN`;
 `--fill-nearest` replaces them with the nearest measurement value.
 
 ## Citation

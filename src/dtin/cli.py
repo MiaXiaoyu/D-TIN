@@ -13,8 +13,9 @@ import pandas as pd
 from dtin import __version__
 from dtin.grid import GridSpec, make_grid
 from dtin.io import describe_load, load_points
-from dtin.methods import METHODS, summarize_model
+from dtin.methods import METHODS, prediction_bounds, summarize_model
 from dtin.projection import unproject
+from dtin.support import nearest_distance
 
 
 def _add_input_args(parser: argparse.ArgumentParser) -> None:
@@ -47,9 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--method", choices=list(METHODS), default="dtin",
                      help="; ".join(f"{k}: {v.help}" for k, v in METHODS.items()))
     rec.add_argument("--scales", type=float, nargs="+", default=None, help="ms-dtin support scales in metres, as in the paper: 1000 5000 10000")
-    rec.add_argument("--weights", type=float, nargs="+", default=None, help="ms-dtin weights, normalised to sum 1")
-    rec.add_argument("--tile-size", type=float, default=None, help="tile size in metres (tile)")
-    rec.add_argument("--degree", type=int, default=None, help="maximum polynomial degree 0-3 (tile)")
+    rec.add_argument("--weights", type=float, nargs="+", default=None, help="ms-dtin weights, one per scale, summing to 1 (default 0.6 0.3 0.1)")
     rec.add_argument("--maxlag", type=float, default=None, help="variogram fitting window in metres (kriging)")
     rec.add_argument("--support", type=float, default=None, help="cell-mean support resolution in metres (kriging); 0 = raw points")
     rec.add_argument("--variant", choices=["ordinary", "simple"], default=None, help="kriging variant")
@@ -64,7 +63,6 @@ def _method_params(args) -> dict:
     params = dict(info.params)
     given = {
         "scales": args.scales, "weights": args.weights,
-        "tile_size": args.tile_size, "degree": args.degree,
         "maxlag": args.maxlag, "support": args.support, "variant": args.variant,
     }
     for key, value in given.items():
@@ -78,14 +76,26 @@ def _method_params(args) -> dict:
         params["weights"] = tuple(params["weights"])
         if len(params["scales"]) != len(params["weights"]):
             raise ValueError("--scales and --weights must have the same length")
+        if min(params["weights"]) < 0 or abs(sum(params["weights"]) - 1.0) > 1e-3:
+            raise ValueError(f"--weights must be non-negative and sum to 1, got {params['weights']}")
     if "support" in params and params["support"] is not None and params["support"] <= 0:
         params["support"] = None
     return params
 
 
-def write_csv(path: Path, nodes: np.ndarray, elev: np.ndarray) -> None:
+def result_table(nodes: np.ndarray, elev: np.ndarray, support_dist: np.ndarray, bounds=None) -> pd.DataFrame:
+    """Output rows: location, elevation, distance to the nearest measurement,
+    and the kriging prediction bounds when the method provides them."""
     lon, lat = unproject(nodes[:, 0], nodes[:, 1])
-    pd.DataFrame({"x": nodes[:, 0], "y": nodes[:, 1], "lon": lon, "lat": lat, "elev": elev}).to_csv(path, index=False)
+    table = pd.DataFrame({"x": nodes[:, 0], "y": nodes[:, 1], "lon": lon, "lat": lat,
+                          "elev": elev, "support_dist_m": support_dist})
+    if bounds is not None:
+        table["elev_lo"], table["elev_hi"] = bounds
+    return table
+
+
+def write_csv(path: Path, nodes: np.ndarray, elev: np.ndarray, support_dist: np.ndarray, bounds=None) -> None:
+    result_table(nodes, elev, support_dist, bounds).to_csv(path, index=False)
 
 
 def write_geotiff(path: Path, spec: GridSpec, elev: np.ndarray, crs: str) -> None:
@@ -150,15 +160,20 @@ def cmd_reconstruct(args) -> int:
     t1 = time.perf_counter()
     elev = model.predict(nodes, outside="nearest" if args.fill_nearest else "nan")
     t_pred = time.perf_counter() - t1
+    support_dist = nearest_distance(xy, nodes)
+    bounds = prediction_bounds(model, elev)
     inside = float(np.isfinite(elev).mean()) if len(elev) else 0.0
     print(f"inside hull: {100 * inside:.1f}%   fit {t_fit:.2f} s, predict {t_pred:.2f} s")
+    if len(support_dist):
+        print(f"distance to nearest measurement: median {np.median(support_dist) / 1000:.2f} km, "
+              f"max {support_dist.max() / 1000:.2f} km")
     if len(elev) and not np.isfinite(elev).any():
         print("warning: every output point is outside the convex hull of the input; all values are NaN", file=sys.stderr)
 
     if out.suffix.lower() in (".tif", ".tiff"):
         write_geotiff(out, spec, elev, pts.attrs["report"].crs)
     else:
-        write_csv(out, nodes, elev)
+        write_csv(out, nodes, elev, support_dist, bounds)
     print(f"wrote {out}")
     return 0
 
