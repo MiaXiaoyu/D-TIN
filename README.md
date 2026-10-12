@@ -8,7 +8,7 @@ accepted IEEE ICDM 2026 SSTDM Workshop paper.
 ## Install
 
 ```bash
-pip install git+https://github.com/MiaXiaoyu/dtin
+pip install git+https://github.com/MiaXiaoyu/D-TIN
 ```
 
 Kriging needs additional packages. From a cloned repository, install them
